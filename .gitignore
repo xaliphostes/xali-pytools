@@ -1,0 +1,6 @@
+venv*
+.claude
+dist
+__pycache__
+.DS_Store
+xali_tools.egg-info
