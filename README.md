@@ -32,4 +32,9 @@ Create the wheel:
 python -m build
 ```
 
+Force install the wheel:
+```sh
+pip install --force-reinstall dist/*.whl
+```
+
 This creates `dist/xali_tools-0.1.0-py3-none-any.whl`.

@@ -833,3 +833,320 @@ class PressureInversionModel:
         return (f"PressureInversionModel(n_tectonic={self.n_tectonic}, "
                 f"gravity={self.include_gravity}, n_pressure={self.n_pressure}, "
                 f"n_points={len(self.points)}, types={type_counts})")
+
+
+# =============================================================================
+# Direct Stress Inversion Model (using parameterizations)
+# =============================================================================
+
+from .stress_tensor import StressParameterization
+
+
+@dataclass
+class DirectInversionResult:
+    """Result of direct stress inversion using parameterization."""
+    best_params: Dict                  # Optimal parameter values
+    best_stress: np.ndarray            # Optimal stress tensor (6 components)
+    best_cost: float                   # Minimum cost achieved
+    n_iterations: int                  # Number of iterations
+    costs_per_point: np.ndarray        # Cost at each point with best stress
+    param_names: List[str]             # Parameter names for reference
+    all_costs: Optional[np.ndarray] = None  # Full cost history (optional)
+    all_params: Optional[List[Dict]] = None  # All sampled parameters (optional)
+
+
+@dataclass
+class DirectPointData:
+    """Data for a single observation point (no source stresses needed)."""
+    data_type: DataType
+    observed_data: Dict
+    weight: float = 1.0
+
+
+class DirectStressInversionModel:
+    """
+    Model for directly inverting stress tensor using parameterizations.
+
+    Unlike StressInversionModel which combines pre-computed source stresses,
+    this model directly searches for the optimal stress tensor in a parameter
+    space defined by a StressParameterization (Anderson, Principal, etc.).
+
+    Example:
+        from xali_tools.geophysics import (
+            DirectStressInversionModel, AndersonParameterization
+        )
+
+        model = DirectStressInversionModel()
+
+        # Add joint observations (only need normal, no source stresses)
+        model.add_joint(normal=[0, 0, 1])
+        model.add_joint(normal=[0.7, 0.7, 0])
+
+        # Add stress direction observation
+        model.add_stress_direction_and_ratio(
+            direction=[1, 0, 0], R=0.5, principal_index=0
+        )
+
+        # Define parameterization (Anderson model)
+        param = AndersonParameterization(
+            Sh_range=(5, 30),
+            SH_range=(10, 50),
+            Sv_range=(20, 60),
+            theta_range=(0, 180)
+        )
+
+        # Run inversion
+        result = model.run(param, n_iterations=50000)
+        print(f"Best params: {result.best_params}")
+        print(f"Best stress: {result.best_stress}")
+    """
+
+    def __init__(self):
+        """Initialize the direct stress inversion model."""
+        self.points: List[DirectPointData] = []
+
+    def add_point(self, data_type: DataType, observed_data: Dict,
+                  weight: float = 1.0) -> None:
+        """
+        Add an observation point.
+
+        Args:
+            data_type: Type of observation data.
+            observed_data: Dictionary with observation data.
+            weight: Weight for this point in total cost.
+        """
+        self.points.append(DirectPointData(
+            data_type=data_type,
+            observed_data=observed_data,
+            weight=weight
+        ))
+
+    def add_joint(self, normal: np.ndarray, weight: float = 1.0) -> None:
+        """
+        Add a joint/fracture observation.
+
+        Args:
+            normal: Joint normal vector [nx, ny, nz].
+            weight: Weight for this point.
+        """
+        self.add_point(
+            data_type=DataType.JOINT,
+            observed_data={"normal": np.asarray(normal, dtype=np.float64)},
+            weight=weight
+        )
+
+    def add_stylolite(self, normal: np.ndarray, weight: float = 1.0) -> None:
+        """
+        Add a stylolite observation.
+
+        Args:
+            normal: Stylolite normal vector [nx, ny, nz].
+            weight: Weight for this point.
+        """
+        self.add_point(
+            data_type=DataType.STYLOLITE,
+            observed_data={"normal": np.asarray(normal, dtype=np.float64)},
+            weight=weight
+        )
+
+    def add_stress_direction(self, direction: np.ndarray,
+                             principal_index: int = 0,
+                             weight: float = 1.0) -> None:
+        """
+        Add a principal stress direction observation.
+
+        Args:
+            direction: Observed principal direction [nx, ny, nz].
+            principal_index: Which principal stress (0=S1, 1=S2, 2=S3).
+            weight: Weight for this point.
+        """
+        self.add_point(
+            data_type=DataType.STRESS_DIRECTION,
+            observed_data={
+                "direction": np.asarray(direction, dtype=np.float64),
+                "principal_index": principal_index
+            },
+            weight=weight
+        )
+
+    def add_stress_ratio(self, R: float, weight: float = 1.0) -> None:
+        """
+        Add a stress ratio observation.
+
+        Args:
+            R: Observed stress ratio (S2-S3)/(S1-S3).
+            weight: Weight for this point.
+        """
+        self.add_point(
+            data_type=DataType.STRESS_RATIO,
+            observed_data={"R": float(R)},
+            weight=weight
+        )
+
+    def add_stress_direction_and_ratio(self, direction: np.ndarray, R: float,
+                                       principal_index: int = 0,
+                                       weight_direction: float = 0.5,
+                                       weight_ratio: float = 0.5,
+                                       weight: float = 1.0) -> None:
+        """
+        Add a combined direction + ratio observation.
+
+        Args:
+            direction: Observed principal direction [nx, ny, nz].
+            R: Observed stress ratio (S2-S3)/(S1-S3).
+            principal_index: Which principal stress (0=S1, 1=S2, 2=S3).
+            weight_direction: Internal weight for direction vs ratio.
+            weight_ratio: Internal weight for ratio vs direction.
+            weight: Weight for this point.
+        """
+        self.add_point(
+            data_type=DataType.STRESS_DIRECTION_AND_RATIO,
+            observed_data={
+                "direction": np.asarray(direction, dtype=np.float64),
+                "R": float(R),
+                "principal_index": principal_index,
+                "weight_direction": weight_direction,
+                "weight_ratio": weight_ratio
+            },
+            weight=weight
+        )
+
+    def compute_point_cost(self, stress: np.ndarray,
+                           point: DirectPointData) -> float:
+        """
+        Compute cost for a single point given stress tensor.
+
+        Args:
+            stress: Stress tensor (6 components).
+            point: Point data with observation.
+
+        Returns:
+            Cost value.
+        """
+        data = point.observed_data
+        dtype = point.data_type
+
+        if dtype == DataType.JOINT:
+            return cost_single_joint(data["normal"], stress)
+
+        elif dtype == DataType.STYLOLITE:
+            return cost_single_stylolite(data["normal"], stress)
+
+        elif dtype == DataType.STRESS_DIRECTION:
+            return cost_direction(
+                data["direction"],
+                stress,
+                data["principal_index"]
+            )
+
+        elif dtype == DataType.STRESS_RATIO:
+            return cost_stress_ratio(data["R"], stress)
+
+        elif dtype == DataType.STRESS_DIRECTION_AND_RATIO:
+            c_dir = cost_direction(
+                data["direction"],
+                stress,
+                data["principal_index"]
+            )
+            c_ratio = cost_stress_ratio(data["R"], stress)
+            w_dir = data["weight_direction"]
+            w_ratio = data["weight_ratio"]
+            total = w_dir + w_ratio
+            return (w_dir * c_dir + w_ratio * c_ratio) / total
+
+        else:
+            raise ValueError(f"Unknown data type: {dtype}")
+
+    def compute_total_cost(self, stress: np.ndarray) -> float:
+        """
+        Compute total cost for given stress tensor.
+
+        Args:
+            stress: Stress tensor (6 components).
+
+        Returns:
+            Weighted sum of costs across all points.
+        """
+        total_cost = 0.0
+        total_weight = 0.0
+
+        for point in self.points:
+            cost = self.compute_point_cost(stress, point)
+            total_cost += point.weight * cost
+            total_weight += point.weight
+
+        return total_cost / total_weight if total_weight > 0 else 0.0
+
+    def run(self, parameterization: StressParameterization,
+            n_iterations: int = 10000,
+            seed: int = None,
+            store_history: bool = False,
+            progress_callback: Callable[[int, float], None] = None
+            ) -> DirectInversionResult:
+        """
+        Run Monte Carlo inversion using the specified parameterization.
+
+        Args:
+            parameterization: StressParameterization defining the parameter space.
+            n_iterations: Number of random parameter combinations to try.
+            seed: Random seed for reproducibility.
+            store_history: If True, store all costs and parameters.
+            progress_callback: Optional callback(iteration, best_cost).
+
+        Returns:
+            DirectInversionResult with optimal parameters and diagnostics.
+        """
+        if len(self.points) == 0:
+            raise ValueError("No observation points added")
+
+        rng = np.random.default_rng(seed)
+
+        best_params = None
+        best_stress = None
+        best_cost = float('inf')
+        all_costs = [] if store_history else None
+        all_params = [] if store_history else None
+
+        for i in range(n_iterations):
+            # Sample parameters from the parameterization
+            params = parameterization.sample(rng)
+            stress = parameterization.to_stress(params)
+
+            cost = self.compute_total_cost(stress)
+
+            if store_history:
+                all_costs.append(cost)
+                all_params.append(params.copy())
+
+            if cost < best_cost:
+                best_cost = cost
+                best_params = params.copy()
+                best_stress = stress.copy()
+
+            if progress_callback is not None and (i + 1) % 1000 == 0:
+                progress_callback(i + 1, best_cost)
+
+        # Compute per-point costs for best stress
+        n_points = len(self.points)
+        costs_per_point = np.zeros(n_points)
+
+        for j, point in enumerate(self.points):
+            costs_per_point[j] = self.compute_point_cost(best_stress, point)
+
+        return DirectInversionResult(
+            best_params=best_params,
+            best_stress=best_stress,
+            best_cost=best_cost,
+            n_iterations=n_iterations,
+            costs_per_point=costs_per_point,
+            param_names=parameterization.param_names,
+            all_costs=np.array(all_costs) if store_history else None,
+            all_params=all_params if store_history else None
+        )
+
+    def __repr__(self) -> str:
+        type_counts = {}
+        for p in self.points:
+            t = p.data_type.value
+            type_counts[t] = type_counts.get(t, 0) + 1
+        return f"DirectStressInversionModel(n_points={len(self.points)}, types={type_counts})"

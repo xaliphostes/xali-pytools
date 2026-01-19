@@ -39,7 +39,8 @@ def _parse_single_surface(lines: List[str], start_idx: int) -> tuple:
     vertices = []
     triangles = []
     properties = {}
-    property_names = []
+    property_names = []  # Raw property names from PROPERTIES line
+    property_sizes = []  # Sizes from ESIZES line (1 for scalar, >1 for vector)
     vertex_id_map = {}
     name = ""
 
@@ -87,17 +88,18 @@ def _parse_single_surface(lines: List[str], start_idx: int) -> tuple:
             i += 1
             continue
 
-        # Parse vertices (VRTX id x y z) - no properties
-        if line.startswith('VRTX'):
-            parts = line.split()
-            vid = int(parts[1])
-            x, y, z = float(parts[2]), float(parts[3]), float(parts[4])
-            vertex_id_map[vid] = len(vertices)
-            vertices.append((x, y, z))
+        # Parse ESIZES (dimensions of each property)
+        # Example: PROPERTIES U a b  with  ESIZES 3 1 1
+        # means: U is a 3D vector (3 values), a and b are scalars (1 value each)
+        # Sum of ESIZES = total number of values after vertex coordinates
+        if line.startswith('ESIZES'):
+            parts = line.split()[1:]
+            property_sizes = [int(s) for s in parts]
             i += 1
             continue
 
         # Parse vertices with properties (PVRTX id x y z prop1 prop2 ...)
+        # Note: Must check PVRTX before VRTX since PVRTX starts with VRTX
         if line.startswith('PVRTX'):
             parts = line.split()
             vid = int(parts[1])
@@ -105,11 +107,45 @@ def _parse_single_surface(lines: List[str], start_idx: int) -> tuple:
             vertex_id_map[vid] = len(vertices)
             vertices.append((x, y, z))
 
-            # Parse property values
+            # Parse property values using ESIZES
             prop_values = parts[5:]
+            value_idx = 0
+
             for j, prop_name in enumerate(property_names):
-                if j < len(prop_values):
-                    properties[prop_name].append(float(prop_values[j]))
+                # Get size for this property (default to 1 if no ESIZES)
+                size = property_sizes[j] if j < len(property_sizes) else 1
+
+                if size == 1:
+                    # Scalar property
+                    if value_idx < len(prop_values):
+                        try:
+                            properties[prop_name].append(float(prop_values[value_idx]))
+                        except ValueError:
+                            properties[prop_name].append(0.0)
+                    value_idx += 1
+                else:
+                    # Vector property - collect 'size' values
+                    vec_values = []
+                    for _ in range(size):
+                        if value_idx < len(prop_values):
+                            try:
+                                vec_values.append(float(prop_values[value_idx]))
+                            except ValueError:
+                                vec_values.append(0.0)
+                        else:
+                            vec_values.append(0.0)
+                        value_idx += 1
+                    properties[prop_name].append(vec_values)
+            i += 1
+            continue
+
+        # Parse vertices without properties (VRTX id x y z)
+        if line.startswith('VRTX'):
+            parts = line.split()
+            vid = int(parts[1])
+            x, y, z = float(parts[2]), float(parts[3]), float(parts[4])
+            vertex_id_map[vid] = len(vertices)
+            vertices.append((x, y, z))
             i += 1
             continue
 
@@ -147,20 +183,65 @@ def _parse_single_surface(lines: List[str], start_idx: int) -> tuple:
     positions = np.array(vertices, dtype=np.float64).flatten()
     indices = np.array(triangles, dtype=np.uint32).flatten()
 
-    # Convert properties to flattened arrays
-    prop_arrays = {}
-    for prop_name, values in properties.items():
-        if values:
-            prop_arrays[prop_name] = np.array(values, dtype=np.float64)
+    # Process properties with ESIZES grouping
+    prop_arrays, prop_sizes_dict = _group_properties_by_esizes(
+        properties, property_names, property_sizes
+    )
 
     surface = SurfaceData(
         positions=positions,
         indices=indices,
         properties=prop_arrays,
+        property_sizes=prop_sizes_dict,
         name=name
     )
 
     return surface, i
+
+
+def _group_properties_by_esizes(
+    properties: dict,
+    property_names: List[str],
+    property_sizes: List[int]
+) -> tuple:
+    """
+    Convert properties to numpy arrays using ESIZES information.
+
+    With ESIZES, each property name corresponds to one size value:
+        PROPERTIES U a b
+        ESIZES 3 1 1
+
+    Results in:
+        - "U": array of shape (n_vertices, 3) - vector property
+        - "a": array of shape (n_vertices,) - scalar property
+        - "b": array of shape (n_vertices,) - scalar property
+
+    Returns:
+        Tuple of (property_arrays dict, property_sizes dict).
+    """
+    prop_arrays = {}
+    prop_sizes_dict = {}
+
+    if not property_names:
+        return prop_arrays, prop_sizes_dict
+
+    for i, prop_name in enumerate(property_names):
+        if prop_name not in properties or not properties[prop_name]:
+            continue
+
+        values = properties[prop_name]
+        size = property_sizes[i] if i < len(property_sizes) else 1
+
+        if size == 1:
+            # Scalar property - values is a list of floats
+            prop_arrays[prop_name] = np.array(values, dtype=np.float64)
+        else:
+            # Vector property - values is a list of lists
+            prop_arrays[prop_name] = np.array(values, dtype=np.float64)
+
+        prop_sizes_dict[prop_name] = size
+
+    return prop_arrays, prop_sizes_dict
 
 
 def load_all_tsurf(filepath: str) -> List[SurfaceData]:
@@ -289,7 +370,6 @@ def _write_single_surface(f, data: SurfaceData) -> None:
     indices = data.indices.reshape(-1, 3)
 
     has_properties = bool(data.properties)
-    prop_names = list(data.properties.keys()) if has_properties else []
 
     # Header
     f.write("GOCAD TSurf 1\n")
@@ -297,9 +377,28 @@ def _write_single_surface(f, data: SurfaceData) -> None:
     f.write(f"name: {data.name or 'surface'}\n")
     f.write("}\n")
 
-    # Property definitions
+    # Prepare property information for ESIZES support
+    # Each entry: (name, esize, values)
+    property_info = []
+
     if has_properties:
+        for name, values in data.properties.items():
+            values = np.asarray(values)
+            if values.ndim == 2 and values.shape[1] > 1:
+                # Vector property
+                dim = values.shape[1]
+                property_info.append((name, dim, values))
+            else:
+                # Scalar property
+                flat_values = values.flatten() if values.ndim > 1 else values
+                property_info.append((name, 1, flat_values))
+
+        # Build PROPERTIES and ESIZES lines
+        prop_names = [name for name, _, _ in property_info]
+        esizes = [str(esize) for _, esize, _ in property_info]
+
         f.write(f"PROPERTIES {' '.join(prop_names)}\n")
+        f.write(f"ESIZES {' '.join(esizes)}\n")
 
     f.write("TFACE\n")
 
@@ -307,9 +406,17 @@ def _write_single_surface(f, data: SurfaceData) -> None:
     for i in range(n_vertices):
         x, y, z = positions[i]
         if has_properties:
-            prop_values = ' '.join(
-                f"{data.properties[name][i]:.6g}" for name in prop_names
-            )
+            # Collect all property values for this vertex
+            prop_values_list = []
+            for name, esize, values in property_info:
+                if esize > 1:
+                    # Vector property - write all components
+                    for j in range(esize):
+                        prop_values_list.append(f"{values[i, j]:.6g}")
+                else:
+                    # Scalar property
+                    prop_values_list.append(f"{values[i]:.6g}")
+            prop_values = ' '.join(prop_values_list)
             f.write(f"PVRTX {i + 1} {x:.6g} {y:.6g} {z:.6g} {prop_values}\n")
         else:
             f.write(f"VRTX {i + 1} {x:.6g} {y:.6g} {z:.6g}\n")

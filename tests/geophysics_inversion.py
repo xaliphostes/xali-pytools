@@ -6,6 +6,9 @@ Tests:
 2. Single-stress Monte Carlo inversion (6 params and 4 Andersonian params)
 3. Multi-source weight inversion (StressInversionModel)
 4. Pressure inversion (PressureInversionModel)
+5. Stress tensor utilities (from_anderson, from_principal, etc.)
+6. Parameterization classes (AndersonParameterization, etc.)
+7. Direct stress inversion (DirectStressInversionModel)
 """
 import numpy as np
 from xali_tools.geophysics.joint import cost_single_joint, cost_multiple_joints
@@ -13,9 +16,23 @@ from xali_tools.geophysics.stylolite import cost_single_stylolite, cost_multiple
 from xali_tools.geophysics.stress_data import compute_stress_ratio, cost_direction
 from xali_tools.geophysics.inversion import monte_carlo_inversion
 from xali_tools.geophysics.stress_inversion_model import (
-    StressInversionModel, PressureInversionModel
+    StressInversionModel, PressureInversionModel, DirectStressInversionModel
 )
 from xali_tools.geophysics.stress_utils import principal_directions
+from xali_tools.geophysics.stress_tensor import (
+    StressTensor,
+    from_anderson,
+    from_anderson_with_lithostatic,
+    from_principal,
+    from_principal_with_directions,
+    from_components,
+    classify_anderson_regime,
+    AndersonRegime,
+    AndersonParameterization,
+    AndersonLithostaticParameterization,
+    PrincipalParameterization,
+    DirectComponentParameterization,
+)
 
 
 def section(title):
@@ -284,6 +301,287 @@ print(f"  All parameters: {result_full.all_parameters[:4]}... (first 4)")
 
 
 # =============================================================================
+# PART 5: Stress Tensor Utilities
+# =============================================================================
+section("PART 5: Stress Tensor Utilities")
+
+# 5a. from_anderson - verify stress tensor construction
+print("\n5a. Anderson model stress tensor:")
+# SH along x-axis (theta=0), normal faulting regime (Sv > SH > Sh)
+stress_and = from_anderson(Sh=10, SH=20, Sv=30, theta=0)
+print(f"  Input: Sh=10, SH=20, Sv=30, theta=0°")
+print(f"  Components: {stress_and.components}")
+print(f"  Expected: Sxx=20, Syy=10, Szz=30, Sxy=Sxz=Syz=0")
+
+# Verify principal stresses
+principals, dirs = stress_and.principal_stresses()
+print(f"  Principal stresses: S1={principals[0]:.1f}, S2={principals[1]:.1f}, S3={principals[2]:.1f}")
+print(f"  S1 direction (should be ~z): {dirs[:, 0]}")
+
+# Test rotated SH (45 degrees from x)
+stress_rot = from_anderson(Sh=10, SH=30, Sv=20, theta=45)
+print(f"\n  Rotated (theta=45°): Sxx={stress_rot.Sxx:.2f}, Syy={stress_rot.Syy:.2f}, Sxy={stress_rot.Sxy:.2f}")
+print(f"  Expected: Sxx=Syy=20, Sxy=10")
+
+# 5b. from_anderson_with_lithostatic
+print("\n5b. Anderson with lithostatic loading:")
+stress_litho = from_anderson_with_lithostatic(
+    Sh_ratio=0.6, SH_ratio=0.8, theta=30, depth=1000, density=2500
+)
+expected_Sv = 2500 * 9.81 * 1000
+print(f"  Input: Sh_ratio=0.6, SH_ratio=0.8, depth=1000m, density=2500")
+print(f"  Expected Sv = ρgz = {expected_Sv/1e6:.2f} MPa")
+print(f"  Szz component: {stress_litho.Szz/1e6:.2f} MPa")
+
+# 5c. classify_anderson_regime
+print("\n5c. Anderson regime classification:")
+print(f"  Sv=30, SH=20, Sh=10 → {classify_anderson_regime(10, 20, 30)} (expect NORMAL)")
+print(f"  Sv=20, SH=30, Sh=10 → {classify_anderson_regime(10, 30, 20)} (expect STRIKE_SLIP)")
+print(f"  Sv=10, SH=30, Sh=20 → {classify_anderson_regime(20, 30, 10)} (expect REVERSE)")
+
+# 5d. from_principal with Euler angles
+print("\n5d. Principal stress with Euler angles:")
+# No rotation - should give diagonal tensor
+stress_p0 = from_principal(S1=30, S2=20, S3=10, alpha=0, beta=0, gamma=0)
+print(f"  No rotation (alpha=beta=gamma=0):")
+print(f"  Components: {stress_p0.components}")
+principals_p0, _ = stress_p0.principal_stresses()
+print(f"  Recovered principals: {principals_p0}")
+
+# 5e. from_principal_with_directions
+print("\n5e. Principal stress with direction vectors:")
+# S1 along x, S2 along y, S3 along z
+stress_dir = from_principal_with_directions(
+    S1=50, S2=30, S3=10,
+    v1=[1, 0, 0]  # S1 along x
+)
+print(f"  S1=50 along x, S2=30, S3=10")
+print(f"  Sxx={stress_dir.Sxx:.1f} (expect 50)")
+print(f"  Stress ratio R: {stress_dir.stress_ratio():.4f} (expect 0.5)")
+
+# 5f. StressTensor properties
+print("\n5f. StressTensor methods:")
+tensor = from_components(Sxx=20, Sxy=5, Sxz=0, Syy=15, Syz=0, Szz=10)
+print(f"  Components: {tensor.components}")
+print(f"  As matrix:\n{tensor.to_matrix()}")
+principals, _ = tensor.principal_stresses()
+print(f"  Principals: {principals}")
+print(f"  Stress ratio: {tensor.stress_ratio():.4f}")
+
+
+# =============================================================================
+# PART 6: Parameterization Classes
+# =============================================================================
+section("PART 6: Parameterization Classes")
+
+# 6a. AndersonParameterization
+print("\n6a. AndersonParameterization:")
+param_and = AndersonParameterization(
+    Sh_range=(5, 20),
+    SH_range=(15, 40),
+    Sv_range=(25, 50),
+    theta_range=(0, 180)
+)
+print(f"  Parameters: {param_and.param_names}")
+print(f"  N params: {param_and.n_params}")
+
+rng = np.random.default_rng(42)
+sample = param_and.sample(rng)
+print(f"  Sample: {sample}")
+stress_sample = param_and.to_stress(sample)
+print(f"  Stress: {stress_sample}")
+
+# 6b. AndersonLithostaticParameterization
+print("\n6b. AndersonLithostaticParameterization:")
+param_litho = AndersonLithostaticParameterization(
+    Sh_ratio_range=(0.4, 0.9),
+    SH_ratio_range=(0.6, 1.2),
+    theta_range=(0, 180),
+    depth_range=(500, 2000),
+    density=2700
+)
+print(f"  Parameters: {param_litho.param_names}")
+sample_litho = param_litho.sample(rng)
+print(f"  Sample: {sample_litho}")
+stress_litho = param_litho.to_stress(sample_litho)
+print(f"  Stress Szz (vertical): {stress_litho[5]/1e6:.2f} MPa")
+
+# 6c. PrincipalParameterization
+print("\n6c. PrincipalParameterization:")
+param_princ = PrincipalParameterization(
+    S1_range=(20, 50),
+    S2_range=(10, 30),
+    S3_range=(0, 15),
+    alpha_range=(0, 360),
+    beta_range=(0, 180),
+    gamma_range=(0, 360)
+)
+print(f"  Parameters: {param_princ.param_names}")
+sample_princ = param_princ.sample(rng)
+print(f"  Sample S1={sample_princ['S1']:.1f}, S2={sample_princ['S2']:.1f}, S3={sample_princ['S3']:.1f}")
+
+# 6d. DirectComponentParameterization
+print("\n6d. DirectComponentParameterization:")
+param_direct = DirectComponentParameterization(
+    Sxx_range=(0, 50),
+    Syy_range=(0, 50),
+    Szz_range=(0, 50),
+    Sxy_range=(-10, 10),
+    Sxz_range=(-10, 10),
+    Syz_range=(-10, 10)
+)
+print(f"  Parameters: {param_direct.param_names}")
+sample_direct, stress_direct = param_direct.sample_stress(rng)
+print(f"  Sample stress: {stress_direct}")
+
+
+# =============================================================================
+# PART 7: Direct Stress Inversion (DirectStressInversionModel)
+# =============================================================================
+section("PART 7: Direct Stress Inversion (DirectStressInversionModel)")
+
+# 7a. Invert for Anderson stress from joint observations
+print("\n7a. Invert Anderson stress from joints:")
+
+# True stress: normal faulting, SH oriented N45E
+true_Sh, true_SH, true_Sv, true_theta = 15, 25, 40, 45
+true_stress_d = from_anderson(true_Sh, true_SH, true_Sv, true_theta)
+_, true_dirs_d = true_stress_d.principal_stresses()
+true_S3_dir = true_dirs_d[:, 2]  # S3 direction
+
+print(f"  True params: Sh={true_Sh}, SH={true_SH}, Sv={true_Sv}, theta={true_theta}°")
+print(f"  True S3 direction: {true_S3_dir}")
+
+# Generate synthetic joint observations (normals ~ S3)
+np.random.seed(42)
+model_d = DirectStressInversionModel()
+for _ in range(20):
+    normal = true_S3_dir + np.random.randn(3) * 0.15
+    normal /= np.linalg.norm(normal)
+    model_d.add_joint(normal=normal)
+
+print(f"  {model_d}")
+
+# Invert with Anderson parameterization
+param_inv = AndersonParameterization(
+    Sh_range=(5, 30),
+    SH_range=(10, 50),
+    Sv_range=(20, 60),
+    theta_range=(0, 180)
+)
+
+result_d = model_d.run(param_inv, n_iterations=30000, seed=123)
+print(f"  Best cost: {result_d.best_cost:.6f}")
+print(f"  Recovered params:")
+for name in result_d.param_names:
+    print(f"    {name}: {result_d.best_params[name]:.2f}")
+
+# Compare S3 directions
+rec_tensor = StressTensor(result_d.best_stress)
+_, rec_dirs_d = rec_tensor.principal_stresses()
+rec_S3 = rec_dirs_d[:, 2]
+alignment = abs(np.dot(rec_S3, true_S3_dir))
+print(f"  S3 alignment: {alignment:.4f}")
+
+# 7b. Invert with mixed observations (joints + stylolites + direction/ratio)
+print("\n7b. Mixed observations with Anderson inversion:")
+
+# True stress
+true_stress_m = from_anderson(Sh=10, SH=30, Sv=20, theta=60)
+vals_m, dirs_m = true_stress_m.principal_stresses()
+true_R_m = true_stress_m.stress_ratio()
+
+print(f"  True: Sh=10, SH=30, Sv=20, theta=60°")
+print(f"  True R: {true_R_m:.4f}")
+
+model_m2 = DirectStressInversionModel()
+np.random.seed(456)
+
+# Add joints (S3 aligned)
+for _ in range(10):
+    normal = dirs_m[:, 2] + np.random.randn(3) * 0.1
+    normal /= np.linalg.norm(normal)
+    model_m2.add_joint(normal=normal)
+
+# Add stylolites (S1 aligned)
+for _ in range(10):
+    normal = dirs_m[:, 0] + np.random.randn(3) * 0.1
+    normal /= np.linalg.norm(normal)
+    model_m2.add_stylolite(normal=normal)
+
+# Add direction + ratio
+for _ in range(5):
+    direction = dirs_m[:, 0] + np.random.randn(3) * 0.1
+    direction /= np.linalg.norm(direction)
+    R = np.clip(true_R_m + np.random.randn() * 0.05, 0, 1)
+    model_m2.add_stress_direction_and_ratio(direction=direction, R=R, principal_index=0)
+
+print(f"  {model_m2}")
+
+param_m2 = AndersonParameterization(
+    Sh_range=(0, 40),
+    SH_range=(10, 50),
+    Sv_range=(5, 40),
+    theta_range=(0, 180)
+)
+
+result_m2 = model_m2.run(param_m2, n_iterations=50000, seed=789)
+print(f"  Best cost: {result_m2.best_cost:.6f}")
+print(f"  Recovered Sh: {result_m2.best_params['Sh']:.1f} (true: 10)")
+print(f"  Recovered SH: {result_m2.best_params['SH']:.1f} (true: 30)")
+print(f"  Recovered Sv: {result_m2.best_params['Sv']:.1f} (true: 20)")
+print(f"  Recovered theta: {result_m2.best_params['theta']:.1f}° (true: 60°)")
+
+rec_tensor_m2 = StressTensor(result_m2.best_stress)
+rec_R_m2 = rec_tensor_m2.stress_ratio()
+print(f"  Recovered R: {rec_R_m2:.4f} (true: {true_R_m:.4f})")
+
+# 7c. Invert with Principal parameterization
+print("\n7c. Invert with PrincipalParameterization:")
+
+# True stress with specific orientation
+true_S1, true_S2, true_S3 = 50, 30, 10
+true_stress_p = from_principal(true_S1, true_S2, true_S3, alpha=30, beta=45, gamma=0)
+_, dirs_p = true_stress_p.principal_stresses()
+
+model_p = DirectStressInversionModel()
+np.random.seed(111)
+
+# Add joints
+for _ in range(15):
+    normal = dirs_p[:, 2] + np.random.randn(3) * 0.1
+    normal /= np.linalg.norm(normal)
+    model_p.add_joint(normal=normal)
+
+# Add stylolites
+for _ in range(15):
+    normal = dirs_p[:, 0] + np.random.randn(3) * 0.1
+    normal /= np.linalg.norm(normal)
+    model_p.add_stylolite(normal=normal)
+
+param_p = PrincipalParameterization(
+    S1_range=(30, 70),
+    S2_range=(15, 45),
+    S3_range=(0, 25),
+    alpha_range=(0, 360),
+    beta_range=(0, 180),
+    gamma_range=(0, 360)
+)
+
+result_p = model_p.run(param_p, n_iterations=50000, seed=222)
+print(f"  True: S1={true_S1}, S2={true_S2}, S3={true_S3}")
+print(f"  Best cost: {result_p.best_cost:.6f}")
+print(f"  Recovered S1: {result_p.best_params['S1']:.1f}")
+print(f"  Recovered S2: {result_p.best_params['S2']:.1f}")
+print(f"  Recovered S3: {result_p.best_params['S3']:.1f}")
+
+rec_tensor_p = StressTensor(result_p.best_stress)
+_, rec_dirs_p = rec_tensor_p.principal_stresses()
+print(f"  S1 alignment: {abs(np.dot(rec_dirs_p[:, 0], dirs_p[:, 0])):.4f}")
+print(f"  S3 alignment: {abs(np.dot(rec_dirs_p[:, 2], dirs_p[:, 2])):.4f}")
+
+
+# =============================================================================
 # Summary
 # =============================================================================
 section("Summary")
@@ -294,3 +592,6 @@ print("  - stylolite.py: cost_single_stylolite, cost_multiple_stylolites")
 print("  - stress_data.py: compute_stress_ratio, cost_direction, cost_stress_ratio")
 print("  - inversion.py: monte_carlo_inversion (6 params & 4 Andersonian)")
 print("  - stress_inversion_model.py: StressInversionModel, PressureInversionModel")
+print("  - stress_tensor.py: StressTensor, from_anderson, from_principal, etc.")
+print("  - stress_tensor.py: Parameterization classes (Anderson, Principal, etc.)")
+print("  - stress_inversion_model.py: DirectStressInversionModel")

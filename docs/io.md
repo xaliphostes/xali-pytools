@@ -1,8 +1,85 @@
 # File I/O
 
+## SurfaceData
+
+The `SurfaceData` dataclass is the unified structure for 3D mesh data across all file formats.
+
+### Structure
+
+```python
+from xali_tools.io import SurfaceData
+import numpy as np
+
+# Create a surface from scratch
+surface = SurfaceData(
+    positions=np.array([0, 0, 0, 1, 0, 0, 0, 1, 0], dtype=np.float64),  # Flat [x0,y0,z0,...]
+    indices=np.array([0, 1, 2], dtype=np.uint32),  # Flat [i0,j0,k0,...]
+    properties={"elevation": np.array([0.0, 0.5, 1.0])},
+    property_sizes={"elevation": 1},  # 1=scalar, 3=vector, 6=tensor
+    name="triangle"
+)
+```
+
+### Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `positions` | `np.ndarray` | Flat vertex positions `[x0, y0, z0, x1, y1, z1, ...]` |
+| `indices` | `np.ndarray` or `None` | Flat triangle indices `[i0, j0, k0, ...]` |
+| `properties` | `Dict[str, np.ndarray]` | Named properties (scalars, vectors, tensors) |
+| `property_sizes` | `Dict[str, int]` | Item size for each property (1=scalar, 3=vector, 6=tensor) |
+| `name` | `str` | Surface name |
+
+### Properties and Methods
+
+```python
+# Basic info
+print(surface.n_vertices)    # Number of vertices
+print(surface.n_triangles)   # Number of triangles
+print(surface.property_names())  # List of property names
+
+# Get data as matrices
+vertices = surface.get_positions_matrix()  # Shape (n_vertices, 3)
+faces = surface.get_indices_matrix()       # Shape (n_triangles, 3)
+
+# Get property as Serie (view, no copy)
+from xali_tools.core import Serie
+elevation = surface.get_property("elevation")  # Returns Serie
+print(elevation.item_size)  # 1
+
+# Set property
+surface.set_property("normals", normal_data, item_size=3)
+```
+
+### Integration with SerieContainer
+
+Use `SerieContainer` to access derived properties (components, principal values, etc.):
+
+```python
+from xali_tools.io import load_surface
+from xali_tools.core import SerieContainer
+
+# Load surface with stress tensor property
+surface = load_surface("fault.ts")
+
+# Create container from surface properties
+container = SerieContainer()
+for name in surface.property_names():
+    container.add(name, surface.get_property(name))
+
+# Query available scalars for visualization
+scalars = container.get_scalar_names()
+# ['stress:xx', 'stress:von_mises', 'stress:S1', ...]
+
+# Get derived property
+von_mises = container.get("stress:von_mises")
+```
+
+---
+
 ## Unified Surface Loader
 
-Load and save 3D mesh files using a single unified API with the `SurfaceData` structure:
+Load and save 3D mesh files using a single unified API:
 
 ```python
 from xali_tools.io import load_surface, load_surfaces, save_surface, SurfaceData
@@ -70,14 +147,16 @@ import numpy as np
 # Load using TSurf-specific functions
 data = load_tsurf("surface.ts")
 
+# Load all surfaces from a TSurf file
+surfaces = load_all_tsurf("faults.ts")
+
 # Create a surface from scratch
 new_surface = SurfaceData(
     positions=np.array([0, 0, 0, 1, 0, 0, 0, 1, 0], dtype=np.float64),
     indices=np.array([0, 1, 2], dtype=np.uint32),
     properties={"elevation": np.array([0.0, 0.5, 1.0])},
+    property_sizes={"elevation": 1},
     name="triangle"
 )
 save_tsurf(new_surface, "triangle.ts")
 ```
-
-> **Note:** `TSurfData` is an alias for `SurfaceData` for backward compatibility.
