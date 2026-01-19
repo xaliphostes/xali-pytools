@@ -1,9 +1,9 @@
-from xali_tools.io.tsurf_filter import (
-    load_all_tsurf, load_tsurf, save_all_tsurf
+from xali_tools.io.surface_loader import (
+    load_surfaces, save_surfaces
 )
 
 # Load all surfaces from a file
-surfaces = load_all_tsurf("surfaces.ts")
+surfaces = load_surfaces("surfaces.ts")
 print(f"Found {len(surfaces)} surfaces")
 
 for surf in surfaces:
@@ -22,4 +22,4 @@ for surf in surfaces:
 # fault = load_tsurf("model.ts", name="fault_1")
 
 # Save multiple surfaces to a single file
-save_all_tsurf(surfaces, "combined.ts")
+save_surfaces(surfaces, "combined.ts")

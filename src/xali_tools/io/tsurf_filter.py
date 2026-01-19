@@ -24,17 +24,9 @@ data = load_tsurf("multi_surface.ts", name="fault_1")
 """
 
 import numpy as np
-from typing import Dict, List, Optional
-from dataclasses import dataclass
+from typing import List, Optional
 
-
-@dataclass
-class TSurfData:
-    """Container for TSurf data."""
-    positions: np.ndarray  # Flattened [x0, y0, z0, x1, y1, z1, ...]
-    indices: np.ndarray    # Flattened [i0, j0, k0, i1, j1, k1, ...]
-    properties: Dict[str, np.ndarray]  # Property name -> flattened values
-    name: str = ""
+from .surface_data import SurfaceData
 
 
 def _parse_single_surface(lines: List[str], start_idx: int) -> tuple:
@@ -42,7 +34,7 @@ def _parse_single_surface(lines: List[str], start_idx: int) -> tuple:
     Parse a single surface starting at start_idx.
 
     Returns:
-        Tuple of (TSurfData, end_index) where end_index is the line after END.
+        Tuple of (SurfaceData, end_index) where end_index is the line after END.
     """
     vertices = []
     triangles = []
@@ -161,7 +153,7 @@ def _parse_single_surface(lines: List[str], start_idx: int) -> tuple:
         if values:
             prop_arrays[prop_name] = np.array(values, dtype=np.float64)
 
-    surface = TSurfData(
+    surface = SurfaceData(
         positions=positions,
         indices=indices,
         properties=prop_arrays,
@@ -171,7 +163,7 @@ def _parse_single_surface(lines: List[str], start_idx: int) -> tuple:
     return surface, i
 
 
-def load_all_tsurf(filepath: str) -> List[TSurfData]:
+def load_all_tsurf(filepath: str) -> List[SurfaceData]:
     """
     Load all surfaces from a Gocad TSurf file.
 
@@ -179,7 +171,7 @@ def load_all_tsurf(filepath: str) -> List[TSurfData]:
         filepath: Path to the TSurf file.
 
     Returns:
-        List of TSurfData objects, one per surface in the file.
+        List of SurfaceData objects, one per surface in the file.
 
     Raises:
         ValueError: If no valid surfaces are found.
@@ -211,7 +203,7 @@ def load_tsurf(
     filepath: str,
     index: int = 0,
     name: Optional[str] = None
-) -> TSurfData:
+) -> SurfaceData:
     """
     Load a Gocad TSurf file.
 
@@ -221,7 +213,7 @@ def load_tsurf(
         name: Name of the surface to load. If provided, index is ignored.
 
     Returns:
-        TSurfData containing flattened positions, indices, and properties.
+        SurfaceData containing flattened positions, indices, and properties.
 
     Raises:
         ValueError: If the file format is invalid or surface not found.
@@ -288,7 +280,7 @@ def load_all_tsurf_as_dict(filepath: str) -> List[dict]:
     ]
 
 
-def _write_single_surface(f, data: TSurfData) -> None:
+def _write_single_surface(f, data: SurfaceData) -> None:
     """Write a single surface to an open file handle."""
     n_vertices = len(data.positions) // 3
     n_triangles = len(data.indices) // 3
@@ -330,24 +322,24 @@ def _write_single_surface(f, data: TSurfData) -> None:
     f.write("END\n")
 
 
-def save_tsurf(data: TSurfData, filepath: str) -> None:
+def save_tsurf(data: SurfaceData, filepath: str) -> None:
     """
-    Save TSurfData to a Gocad TSurf file.
+    Save SurfaceData to a Gocad TSurf file.
 
     Args:
-        data: TSurfData object containing positions, indices, and properties.
+        data: SurfaceData object containing positions, indices, and properties.
         filepath: Output file path.
     """
     with open(filepath, 'w') as f:
         _write_single_surface(f, data)
 
 
-def save_all_tsurf(surfaces: List[TSurfData], filepath: str) -> None:
+def save_all_tsurf(surfaces: List[SurfaceData], filepath: str) -> None:
     """
     Save multiple surfaces to a single Gocad TSurf file.
 
     Args:
-        surfaces: List of TSurfData objects.
+        surfaces: List of SurfaceData objects.
         filepath: Output file path.
     """
     with open(filepath, 'w') as f:
@@ -364,13 +356,13 @@ def save_tsurf_from_dict(data: dict, filepath: str) -> None:
               'properties' and 'name'.
         filepath: Output file path.
     """
-    tsurf_data = TSurfData(
+    surface_data = SurfaceData(
         positions=np.asarray(data['positions'], dtype=np.float64),
         indices=np.asarray(data['indices'], dtype=np.uint32),
         properties=data.get('properties', {}),
         name=data.get('name', '')
     )
-    save_tsurf(tsurf_data, filepath)
+    save_tsurf(surface_data, filepath)
 
 
 def save_all_tsurf_from_dict(surfaces: List[dict], filepath: str) -> None:
@@ -382,8 +374,8 @@ def save_all_tsurf_from_dict(surfaces: List[dict], filepath: str) -> None:
                   and optionally 'properties' and 'name'.
         filepath: Output file path.
     """
-    tsurf_list = [
-        TSurfData(
+    surface_list = [
+        SurfaceData(
             positions=np.asarray(s['positions'], dtype=np.float64),
             indices=np.asarray(s['indices'], dtype=np.uint32),
             properties=s.get('properties', {}),
@@ -391,4 +383,4 @@ def save_all_tsurf_from_dict(surfaces: List[dict], filepath: str) -> None:
         )
         for s in surfaces
     ]
-    save_all_tsurf(tsurf_list, filepath)
+    save_all_tsurf(surface_list, filepath)

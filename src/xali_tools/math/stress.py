@@ -198,6 +198,124 @@ class StressProperties:
         matrix = self.to_matrix(index_or_name)
         return matrix[:, component]
 
+    def to_tensors(self, index_or_name: Union[int, str] = None,
+                   stress_array: np.ndarray = None) -> np.ndarray:
+        """
+        Convert stress array to 3x3 symmetric tensor matrices.
+
+        Args:
+            index_or_name: Get stress by index or name (optional).
+            stress_array: Use this array directly (optional).
+
+        Returns:
+            Array of shape (m, 3, 3) containing symmetric stress tensors.
+        """
+        matrix = self.to_matrix(index_or_name, stress_array)
+
+        # Build symmetric 3x3 tensors
+        # Order: [σxx, σxy, σxz, σyy, σyz, σzz]
+        tensors = np.zeros((self.n_vertices, 3, 3), dtype=np.float64)
+
+        tensors[:, 0, 0] = matrix[:, 0]  # σxx
+        tensors[:, 0, 1] = matrix[:, 1]  # σxy
+        tensors[:, 0, 2] = matrix[:, 2]  # σxz
+        tensors[:, 1, 0] = matrix[:, 1]  # σxy (symmetric)
+        tensors[:, 1, 1] = matrix[:, 3]  # σyy
+        tensors[:, 1, 2] = matrix[:, 4]  # σyz
+        tensors[:, 2, 0] = matrix[:, 2]  # σxz (symmetric)
+        tensors[:, 2, 1] = matrix[:, 4]  # σyz (symmetric)
+        tensors[:, 2, 2] = matrix[:, 5]  # σzz
+
+        return tensors
+
+    def principal_values(self, index_or_name: Union[int, str] = None,
+                         stress_array: np.ndarray = None) -> np.ndarray:
+        """
+        Compute principal stress values (eigenvalues) for all vertices.
+
+        Principal stresses are ordered: σ1 >= σ2 >= σ3
+
+        Args:
+            index_or_name: Get stress by index or name (optional).
+            stress_array: Use this array directly (optional).
+
+        Returns:
+            Flattened array of size 3*m containing [σ1, σ2, σ3] for each vertex.
+        """
+        tensors = self.to_tensors(index_or_name, stress_array)
+
+        # Compute eigenvalues for all tensors
+        eigenvalues = np.linalg.eigvalsh(tensors)
+
+        # Sort in descending order (σ1 >= σ2 >= σ3)
+        eigenvalues = np.sort(eigenvalues, axis=1)[:, ::-1]
+
+        return eigenvalues.flatten()
+
+    def principal_directions(self, index_or_name: Union[int, str] = None,
+                             stress_array: np.ndarray = None) -> np.ndarray:
+        """
+        Compute principal stress directions (eigenvectors) for all vertices.
+
+        Directions are ordered corresponding to σ1 >= σ2 >= σ3.
+        Each direction is a unit vector [nx, ny, nz].
+
+        Args:
+            index_or_name: Get stress by index or name (optional).
+            stress_array: Use this array directly (optional).
+
+        Returns:
+            Flattened array of size 9*m containing [n1x, n1y, n1z, n2x, n2y, n2z, n3x, n3y, n3z]
+            for each vertex (3 directions × 3 components).
+        """
+        tensors = self.to_tensors(index_or_name, stress_array)
+
+        # Compute eigenvalues and eigenvectors for all tensors
+        eigenvalues, eigenvectors = np.linalg.eigh(tensors)
+
+        # Sort by eigenvalues in descending order (σ1 >= σ2 >= σ3)
+        sort_idx = np.argsort(eigenvalues, axis=1)[:, ::-1]
+
+        # Reorder eigenvectors according to sorted eigenvalues
+        # eigenvectors has shape (m, 3, 3) where eigenvectors[i, :, j] is the j-th eigenvector
+        directions = np.zeros((self.n_vertices, 3, 3), dtype=np.float64)
+        for i in range(self.n_vertices):
+            directions[i] = eigenvectors[i, :, sort_idx[i]].T
+
+        # directions[i] is now (3, 3) with rows being the principal directions
+        return directions.reshape(self.n_vertices, 9).flatten()
+
+    def principal_values_matrix(self, index_or_name: Union[int, str] = None,
+                                stress_array: np.ndarray = None) -> np.ndarray:
+        """
+        Compute principal stress values as (m, 3) matrix.
+
+        Args:
+            index_or_name: Get stress by index or name (optional).
+            stress_array: Use this array directly (optional).
+
+        Returns:
+            Array of shape (m, 3) with columns [σ1, σ2, σ3].
+        """
+        values = self.principal_values(index_or_name, stress_array)
+        return values.reshape(self.n_vertices, 3)
+
+    def principal_directions_matrix(self, index_or_name: Union[int, str] = None,
+                                    stress_array: np.ndarray = None) -> np.ndarray:
+        """
+        Compute principal stress directions as (m, 3, 3) matrix.
+
+        Args:
+            index_or_name: Get stress by index or name (optional).
+            stress_array: Use this array directly (optional).
+
+        Returns:
+            Array of shape (m, 3, 3) where result[i, j, :] is the j-th principal
+            direction (unit vector) at vertex i.
+        """
+        directions = self.principal_directions(index_or_name, stress_array)
+        return directions.reshape(self.n_vertices, 3, 3)
+
     def __repr__(self) -> str:
         return (f"StressProperties(n_vertices={self.n_vertices}, "
                 f"n_stresses={self.n_stresses}, names={self.names})")

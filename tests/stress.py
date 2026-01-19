@@ -63,3 +63,53 @@ print()
 # Get a specific stress by name
 fault1_stress = sp.get("fault_1")
 print(f"fault_1 stress shape: {fault1_stress.shape}")
+print()
+
+# =============================================
+# Principal values and directions
+# =============================================
+print("=" * 50)
+print("Principal stress analysis")
+print("=" * 50)
+
+# Create a simple stress state for testing
+# Pure tension in x: σxx = 10, all others = 0
+# Expected principal values: σ1=10, σ2=0, σ3=0
+# Expected σ1 direction: [1, 0, 0]
+simple_stress = np.zeros(6 * n_vertices)
+simple_stress[0::6] = 10.0  # σxx = 10
+
+sp2 = StressProperties(n_vertices=n_vertices)
+sp2.add(simple_stress, name="tension_x")
+
+# Get principal values (flat array)
+pv = sp2.principal_values("tension_x")
+print(f"Principal values (flat) shape: {pv.shape}")
+print(f"Principal values at vertex 0: {pv[:3]}")  # [10, 0, 0]
+
+# Get principal values as matrix
+pv_matrix = sp2.principal_values_matrix("tension_x")
+print(f"Principal values matrix shape: {pv_matrix.shape}")
+print(f"σ1 for first 5 vertices: {pv_matrix[:5, 0]}")
+print()
+
+# Get principal directions (flat array)
+pd = sp2.principal_directions("tension_x")
+print(f"Principal directions (flat) shape: {pd.shape}")
+print(f"Principal directions at vertex 0: {pd[:9]}")
+
+# Get principal directions as matrix
+pd_matrix = sp2.principal_directions_matrix("tension_x")
+print(f"Principal directions matrix shape: {pd_matrix.shape}")
+print(f"σ1 direction at vertex 0: {pd_matrix[0, 0, :]}")  # Should be [1, 0, 0] or [-1, 0, 0]
+print()
+
+# Test with a more complex stress state
+# Biaxial: σxx = 10, σyy = 5
+biaxial = np.zeros(6 * n_vertices)
+biaxial[0::6] = 10.0  # σxx
+biaxial[3::6] = 5.0   # σyy
+
+sp2.add(biaxial, name="biaxial")
+pv_biax = sp2.principal_values_matrix("biaxial")
+print(f"Biaxial stress principal values at vertex 0: {pv_biax[0]}")  # [10, 5, 0]
