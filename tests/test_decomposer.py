@@ -1,266 +1,332 @@
-"""
-Test for Serie decomposition architecture.
-"""
+"""Tests for Attribute decomposition architecture."""
 
 import numpy as np
-import sys
-sys.path.insert(0, 'src')
-
-from xali_tools.core import Serie, SerieContainer, SerieType
+import pytest
+from xali_tools.core import Attribute, AttributeManager, AttributeType
 
 
-def test_vector3_decomposition():
-    """Test decomposition of a 3D vector into components."""
-    print("=" * 60)
-    print("Test: Vector3 Decomposition")
-    print("=" * 60)
+class TestVector3Decomposition:
+    """Tests for Vector3 decomposition."""
 
-    # Create velocity field
-    velocity_data = np.array([
-        [1.0, 0.0, 0.0],
-        [0.0, 2.0, 0.0],
-        [3.0, 4.0, 0.0],
-    ])
-    velocity = Serie(velocity_data, item_size=3, name="velocity")
+    @pytest.fixture
+    def velocity_manager(self):
+        """Create a manager with velocity data."""
+        velocity_data = np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, 2.0, 0.0],
+            [3.0, 4.0, 0.0],
+        ])
+        velocity = Attribute(velocity_data, item_size=3, name="velocity")
+        manager = AttributeManager()
+        manager.add("velocity", velocity)
+        return manager, velocity_data
 
-    container = SerieContainer()
-    container.add("velocity", velocity)
+    def test_scalar_names_available(self, velocity_manager):
+        """Vector3 exposes scalar component names."""
+        manager, _ = velocity_manager
+        scalars = manager.get_scalar_names()
 
-    # Query available scalars
-    scalars = container.get_scalar_names()
-    print(f"\nAvailable scalars: {scalars}")
+        assert "velocity:x" in scalars
+        assert "velocity:y" in scalars
+        assert "velocity:z" in scalars
+        assert "velocity:norm" in scalars
 
-    # Query available vectors
-    vectors = container.get_vector3_names()
-    print(f"Available vector3: {vectors}")
+    def test_vector_names_available(self, velocity_manager):
+        """Vector3 exposes original vector name."""
+        manager, _ = velocity_manager
+        vectors = manager.get_vector3_names()
 
-    # Get derived properties
-    vx = container.get("velocity:x")
-    vy = container.get("velocity:y")
-    vz = container.get("velocity:z")
-    vnorm = container.get("velocity:norm")
+        assert "velocity" in vectors
 
-    print(f"\nvelocity:x = {vx.as_array()}")
-    print(f"velocity:y = {vy.as_array()}")
-    print(f"velocity:z = {vz.as_array()}")
-    print(f"velocity:norm = {vnorm.as_array()}")
+    def test_component_x(self, velocity_manager):
+        """Can get x component."""
+        manager, data = velocity_manager
+        vx = manager.get("velocity:x")
 
-    # Verify norm calculation
-    expected_norm = np.linalg.norm(velocity_data, axis=1)
-    assert np.allclose(vnorm.as_array(), expected_norm), "Norm calculation failed"
-    print("\n[OK] Vector3 decomposition works correctly!")
+        np.testing.assert_array_almost_equal(vx.as_array(), data[:, 0])
 
+    def test_component_y(self, velocity_manager):
+        """Can get y component."""
+        manager, data = velocity_manager
+        vy = manager.get("velocity:y")
 
-def test_sym_tensor_decomposition():
-    """Test decomposition of symmetric 3x3 tensor into components."""
-    print("\n" + "=" * 60)
-    print("Test: Symmetric Tensor Decomposition")
-    print("=" * 60)
+        np.testing.assert_array_almost_equal(vy.as_array(), data[:, 1])
 
-    # Create stress tensor [xx, xy, xz, yy, yz, zz]
-    # Hydrostatic pressure: diagonal = -p, off-diagonal = 0
-    stress_data = np.array([
-        [-10.0, 0.0, 0.0, -10.0, 0.0, -10.0],  # Hydrostatic
-        [100.0, 0.0, 0.0, 0.0, 0.0, 0.0],      # Uniaxial xx
-        [50.0, 30.0, 0.0, 50.0, 0.0, 50.0],    # With shear
-    ])
-    stress = Serie(stress_data, item_size=6, name="stress")
+    def test_component_z(self, velocity_manager):
+        """Can get z component."""
+        manager, data = velocity_manager
+        vz = manager.get("velocity:z")
 
-    container = SerieContainer()
-    container.add("stress", stress)
+        np.testing.assert_array_almost_equal(vz.as_array(), data[:, 2])
 
-    # Query available properties
-    scalars = container.get_scalar_names()
-    print(f"\nAvailable scalars: {scalars}")
+    def test_norm_calculation(self, velocity_manager):
+        """Norm is calculated correctly."""
+        manager, data = velocity_manager
+        vnorm = manager.get("velocity:norm")
 
-    vectors = container.get_vector3_names()
-    print(f"Available vector3: {vectors}")
-
-    # Get individual components
-    sxx = container.get("stress:xx")
-    sxy = container.get("stress:xy")
-    trace = container.get("stress:trace")
-    vm = container.get("stress:von_mises")
-
-    print(f"\nstress:xx = {sxx.as_array()}")
-    print(f"stress:xy = {sxy.as_array()}")
-    print(f"stress:trace = {trace.as_array()}")
-    print(f"stress:von_mises = {vm.as_array()}")
-
-    # Verify trace
-    expected_trace = stress_data[:, 0] + stress_data[:, 3] + stress_data[:, 5]
-    assert np.allclose(trace.as_array(), expected_trace), "Trace calculation failed"
-    print("\n[OK] SymTensor3 decomposition works correctly!")
+        expected_norm = np.linalg.norm(data, axis=1)
+        np.testing.assert_array_almost_equal(vnorm.as_array(), expected_norm)
 
 
-def test_principal_decomposition():
-    """Test principal value/vector decomposition of symmetric tensor."""
-    print("\n" + "=" * 60)
-    print("Test: Principal Decomposition")
-    print("=" * 60)
+class TestSymTensor3Decomposition:
+    """Tests for symmetric 3x3 tensor decomposition."""
 
-    # Create a simple diagonal tensor (principal axes aligned with coordinates)
-    # [xx, xy, xz, yy, yz, zz] = [100, 0, 0, 50, 0, 25]
-    stress_data = np.array([
-        [100.0, 0.0, 0.0, 50.0, 0.0, 25.0],
-    ])
-    stress = Serie(stress_data, item_size=6, name="stress")
+    @pytest.fixture
+    def stress_manager(self):
+        """Create a manager with stress tensor data."""
+        # [xx, xy, xz, yy, yz, zz]
+        stress_data = np.array([
+            [-10.0, 0.0, 0.0, -10.0, 0.0, -10.0],  # Hydrostatic
+            [100.0, 0.0, 0.0, 0.0, 0.0, 0.0],       # Uniaxial xx
+            [50.0, 30.0, 0.0, 50.0, 0.0, 50.0],     # With shear
+        ])
+        stress = Attribute(stress_data, item_size=6, name="stress")
+        manager = AttributeManager()
+        manager.add("stress", stress)
+        return manager, stress_data
 
-    container = SerieContainer()
-    container.add("stress", stress)
+    def test_component_names_available(self, stress_manager):
+        """SymTensor3 exposes component names."""
+        manager, _ = stress_manager
+        scalars = manager.get_scalar_names()
 
-    # Get principal values
-    s1 = container.get("stress:S1")
-    s2 = container.get("stress:S2")
-    s3 = container.get("stress:S3")
-    pvals = container.get("stress:principal_values")
+        assert "stress:xx" in scalars
+        assert "stress:xy" in scalars
+        assert "stress:xz" in scalars
+        assert "stress:yy" in scalars
+        assert "stress:yz" in scalars
+        assert "stress:zz" in scalars
 
-    print(f"\nstress:S1 = {s1.as_array()}")
-    print(f"stress:S2 = {s2.as_array()}")
-    print(f"stress:S3 = {s3.as_array()}")
-    print(f"stress:principal_values = {pvals.as_array()}")
+    def test_derived_scalars_available(self, stress_manager):
+        """SymTensor3 exposes derived scalar names."""
+        manager, _ = stress_manager
+        scalars = manager.get_scalar_names()
 
-    # Get principal vectors
-    s1_vec = container.get("stress:S1_vec")
-    s2_vec = container.get("stress:S2_vec")
-    s3_vec = container.get("stress:S3_vec")
+        assert "stress:trace" in scalars
+        assert "stress:von_mises" in scalars
 
-    print(f"\nstress:S1_vec = {s1_vec.as_array()}")
-    print(f"stress:S2_vec = {s2_vec.as_array()}")
-    print(f"stress:S3_vec = {s3_vec.as_array()}")
+    def test_principal_vector_names_available(self, stress_manager):
+        """SymTensor3 exposes principal direction vectors."""
+        manager, _ = stress_manager
+        vectors = manager.get_vector3_names()
 
-    # For diagonal tensor, principal values should be the diagonal elements
-    # sorted by magnitude: 100, 50, 25
-    assert np.isclose(s1.as_array()[0], 100.0), f"S1 should be 100, got {s1.as_array()[0]}"
-    assert np.isclose(s2.as_array()[0], 50.0), f"S2 should be 50, got {s2.as_array()[0]}"
-    assert np.isclose(s3.as_array()[0], 25.0), f"S3 should be 25, got {s3.as_array()[0]}"
-    print("\n[OK] Principal decomposition works correctly!")
+        assert "stress:S1_vec" in vectors
+        assert "stress:S2_vec" in vectors
+        assert "stress:S3_vec" in vectors
 
+    def test_component_xx(self, stress_manager):
+        """Can get xx component."""
+        manager, data = stress_manager
+        sxx = manager.get("stress:xx")
 
-def test_container_summary():
-    """Test the container summary functionality."""
-    print("\n" + "=" * 60)
-    print("Test: Container Summary")
-    print("=" * 60)
+        np.testing.assert_array_almost_equal(sxx.as_array(), data[:, 0])
 
-    container = SerieContainer()
-    container.add("pressure", Serie(np.random.rand(100), item_size=1))
-    container.add("velocity", Serie(np.random.rand(100, 3), item_size=3))
-    container.add("stress", Serie(np.random.rand(100, 6), item_size=6))
+    def test_component_xy(self, stress_manager):
+        """Can get xy component."""
+        manager, data = stress_manager
+        sxy = manager.get("stress:xy")
 
-    print(container.summary())
-    print("\n[OK] Container summary works!")
+        np.testing.assert_array_almost_equal(sxy.as_array(), data[:, 1])
 
+    def test_trace_calculation(self, stress_manager):
+        """Trace is calculated correctly."""
+        manager, data = stress_manager
+        trace = manager.get("stress:trace")
 
-def test_caching():
-    """Test that derived series are cached."""
-    print("\n" + "=" * 60)
-    print("Test: Caching")
-    print("=" * 60)
-
-    velocity = Serie(np.random.rand(1000, 3), item_size=3)
-    container = SerieContainer()
-    container.add("velocity", velocity)
-
-    # First access - computes
-    vx1 = container.get("velocity:x")
-    # Second access - should be cached
-    vx2 = container.get("velocity:x")
-
-    assert vx1 is vx2, "Caching not working - should return same object"
-    print("First and second access return same cached object")
-    print("[OK] Caching works correctly!")
+        expected_trace = data[:, 0] + data[:, 3] + data[:, 5]  # xx + yy + zz
+        np.testing.assert_array_almost_equal(trace.as_array(), expected_trace)
 
 
-def test_explicit_serie_type():
-    """Test explicit serie_type specification for ambiguous itemSize."""
-    print("\n" + "=" * 60)
-    print("Test: Explicit SerieType for Ambiguous itemSize=3")
-    print("=" * 60)
+class TestPrincipalDecomposition:
+    """Tests for principal value/vector decomposition."""
 
-    # itemSize=3 could be vector3 or sym_tensor2
-    data = np.array([[1.0, 0.5, 2.0], [3.0, 1.0, 4.0]])
+    @pytest.fixture
+    def diagonal_stress_manager(self):
+        """Create manager with diagonal tensor (principal axes aligned)."""
+        # [xx, xy, xz, yy, yz, zz] = [100, 0, 0, 50, 0, 25]
+        stress_data = np.array([[100.0, 0.0, 0.0, 50.0, 0.0, 25.0]])
+        stress = Attribute(stress_data, item_size=6, name="stress")
+        manager = AttributeManager()
+        manager.add("stress", stress)
+        return manager
 
-    # Default: itemSize=3 is treated as vector3
-    vec = Serie(data, item_size=3, name="displacement")
-    print(f"\nDefault (itemSize=3): serie_type = {vec.serie_type}")
-    assert vec.serie_type == SerieType.VECTOR3
+    def test_principal_values_available(self, diagonal_stress_manager):
+        """Principal values are available."""
+        manager = diagonal_stress_manager
+        scalars = manager.get_scalar_names()
 
-    # Explicit: itemSize=3 as sym_tensor2 (2D symmetric tensor [xx, xy, yy])
-    tensor = Serie(data, item_size=3, name="strain_2d", serie_type=SerieType.SYM_TENSOR2)
-    print(f"Explicit: serie_type = {tensor.serie_type}")
-    assert tensor.serie_type == SerieType.SYM_TENSOR2
+        assert "stress:S1" in scalars
+        assert "stress:S2" in scalars
+        assert "stress:S3" in scalars
 
-    # Create container with both
-    container = SerieContainer()
-    container.add("displacement", vec)
-    container.add("strain_2d", tensor)
+    def test_principal_values_sorted(self, diagonal_stress_manager):
+        """Principal values are sorted by magnitude (S1 >= S2 >= S3)."""
+        manager = diagonal_stress_manager
 
-    # Vector3 gets vector decomposition
-    vec_scalars = [n for n in container.get_scalar_names() if n.startswith("displacement")]
-    print(f"\nVector3 'displacement' scalars: {vec_scalars}")
-    assert "displacement:x" in vec_scalars
-    assert "displacement:trace" not in vec_scalars  # NOT tensor decomposition
+        s1 = manager.get("stress:S1")
+        s2 = manager.get("stress:S2")
+        s3 = manager.get("stress:S3")
 
-    # SymTensor2 gets tensor decomposition
-    tensor_scalars = [n for n in container.get_scalar_names() if n.startswith("strain_2d")]
-    print(f"SymTensor2 'strain_2d' scalars: {tensor_scalars}")
-    assert "strain_2d:xx" in tensor_scalars
-    assert "strain_2d:trace" in tensor_scalars
-    assert "strain_2d:x" not in tensor_scalars  # NOT vector decomposition
+        # For diagonal tensor [100, 50, 25], principal values should be sorted
+        np.testing.assert_almost_equal(s1.as_array()[0], 100.0)
+        np.testing.assert_almost_equal(s2.as_array()[0], 50.0)
+        np.testing.assert_almost_equal(s3.as_array()[0], 25.0)
 
-    print("\n[OK] Explicit SerieType works correctly!")
+    def test_principal_values_attribute(self, diagonal_stress_manager):
+        """Can get all principal values as single attribute."""
+        manager = diagonal_stress_manager
+        pvals = manager.get("stress:principal_values")
 
+        assert pvals.item_size == 3
+        np.testing.assert_array_almost_equal(
+            pvals.as_array()[0], [100.0, 50.0, 25.0]
+        )
 
-def test_use_case_visualization():
-    """Demonstrate the main use case: visualization property selection."""
-    print("\n" + "=" * 60)
-    print("Use Case: Visualization Property Selection")
-    print("=" * 60)
+    def test_principal_vectors_available(self, diagonal_stress_manager):
+        """Principal vectors are available."""
+        manager = diagonal_stress_manager
+        vectors = manager.get_vector3_names()
 
-    # Simulate loading a surface with multiple properties
-    n_points = 1000
-    container = SerieContainer()
-    container.add("temperature", Serie(np.random.rand(n_points) * 100, item_size=1))
-    container.add("displacement", Serie(np.random.rand(n_points, 3), item_size=3))
-    container.add("stress", Serie(np.random.rand(n_points, 6), item_size=6))
-
-    print("\nLoaded properties:")
-    for name in container.names:
-        serie = container.get(name)
-        print(f"  - {name}: itemSize={serie.item_size}, n={serie.n_items}")
-
-    print("\n--- For Iso-Contouring (need scalars) ---")
-    scalars = container.get_scalar_names()
-    print(f"Available: {scalars}")
-    print(f"User selects: 'stress:von_mises'")
-    vm = container.get("stress:von_mises")
-    print(f"  → Serie with {vm.n_items} values, range: [{vm.as_array().min():.3f}, {vm.as_array().max():.3f}]")
-
-    print("\n--- For Vector Field Display (need vector3) ---")
-    vectors = container.get_vector3_names()
-    print(f"Available: {vectors}")
-    print(f"User selects: 'displacement'")
-    disp = container.get("displacement")
-    print(f"  → Serie with {disp.n_items} vectors")
-
-    print("\n--- For Streamlines (need vector3) ---")
-    print(f"User selects: 'stress:S1_vec' (max principal direction)")
-    s1_vec = container.get("stress:S1_vec")
-    print(f"  → Serie with {s1_vec.n_items} direction vectors")
-
-    print("\n[OK] Visualization use case demonstrated!")
+        assert "stress:S1_vec" in vectors
+        assert "stress:S2_vec" in vectors
+        assert "stress:S3_vec" in vectors
 
 
-if __name__ == "__main__":
-    test_vector3_decomposition()
-    test_sym_tensor_decomposition()
-    test_principal_decomposition()
-    test_container_summary()
-    test_caching()
-    test_explicit_serie_type()
-    test_use_case_visualization()
+class TestManagerFeatures:
+    """Tests for AttributeManager features."""
 
-    print("\n" + "=" * 60)
-    print("ALL TESTS PASSED!")
-    print("=" * 60)
+    def test_summary(self):
+        """Manager summary works."""
+        manager = AttributeManager()
+        manager.add("pressure", Attribute(np.random.rand(100), item_size=1))
+        manager.add("velocity", Attribute(np.random.rand(100, 3), item_size=3))
+        manager.add("stress", Attribute(np.random.rand(100, 6), item_size=6))
+
+        summary = manager.summary()
+
+        assert "pressure" in summary
+        assert "velocity" in summary
+        assert "stress" in summary
+
+    def test_caching(self):
+        """Derived attributes are cached."""
+        velocity = Attribute(np.random.rand(1000, 3), item_size=3)
+        manager = AttributeManager()
+        manager.add("velocity", velocity)
+
+        vx1 = manager.get("velocity:x")
+        vx2 = manager.get("velocity:x")
+
+        assert vx1 is vx2  # Same object returned
+
+    def test_cache_invalidation(self):
+        """Cache is invalidated when base attribute changes."""
+        velocity = Attribute(np.random.rand(10, 3), item_size=3)
+        manager = AttributeManager()
+        manager.add("velocity", velocity)
+
+        # Access to populate cache
+        vx1 = manager.get("velocity:x")
+
+        # Replace attribute
+        new_velocity = Attribute(np.random.rand(10, 3), item_size=3)
+        manager.add("velocity", new_velocity)
+
+        vx2 = manager.get("velocity:x")
+
+        # Should be different object (new computation)
+        assert vx1 is not vx2
+
+
+class TestExplicitAttributeType:
+    """Tests for explicit AttributeType specification."""
+
+    def test_default_itemsize3_is_vector(self):
+        """itemSize=3 defaults to vector3."""
+        data = np.array([[1.0, 0.5, 2.0], [3.0, 1.0, 4.0]])
+        vec = Attribute(data, item_size=3, name="displacement")
+
+        assert vec.attribute_type == AttributeType.VECTOR3
+
+    def test_explicit_sym_tensor2(self):
+        """Can explicitly set itemSize=3 as sym_tensor2."""
+        data = np.array([[1.0, 0.5, 2.0], [3.0, 1.0, 4.0]])
+        tensor = Attribute(
+            data, item_size=3, name="strain_2d",
+            attribute_type=AttributeType.SYM_TENSOR2
+        )
+
+        assert tensor.attribute_type == AttributeType.SYM_TENSOR2
+
+    def test_vector3_gets_vector_decomposition(self):
+        """Vector3 gets vector decomposition, not tensor."""
+        data = np.array([[1.0, 0.5, 2.0], [3.0, 1.0, 4.0]])
+        vec = Attribute(data, item_size=3, attribute_type=AttributeType.VECTOR3)
+
+        manager = AttributeManager()
+        manager.add("displacement", vec)
+
+        scalars = manager.get_scalar_names()
+        assert "displacement:x" in scalars
+        assert "displacement:trace" not in scalars
+
+    def test_sym_tensor2_gets_tensor_decomposition(self):
+        """SymTensor2 gets tensor decomposition, not vector."""
+        data = np.array([[1.0, 0.5, 2.0], [3.0, 1.0, 4.0]])
+        tensor = Attribute(
+            data, item_size=3,
+            attribute_type=AttributeType.SYM_TENSOR2
+        )
+
+        manager = AttributeManager()
+        manager.add("strain_2d", tensor)
+
+        scalars = manager.get_scalar_names()
+        assert "strain_2d:xx" in scalars
+        assert "strain_2d:trace" in scalars
+        assert "strain_2d:x" not in scalars
+
+
+class TestVisualizationUseCase:
+    """Tests demonstrating visualization property selection use case."""
+
+    @pytest.fixture
+    def loaded_manager(self):
+        """Create manager with typical loaded properties."""
+        n_points = 100
+        manager = AttributeManager()
+        manager.add("temperature", Attribute(np.random.rand(n_points) * 100, item_size=1))
+        manager.add("displacement", Attribute(np.random.rand(n_points, 3), item_size=3))
+        manager.add("stress", Attribute(np.random.rand(n_points, 6), item_size=6))
+        return manager
+
+    def test_scalar_selection_for_contouring(self, loaded_manager):
+        """Can get scalar for iso-contouring."""
+        manager = loaded_manager
+        scalars = manager.get_scalar_names()
+
+        assert "temperature" in scalars
+        assert "stress:von_mises" in scalars
+
+        vm = manager.get("stress:von_mises")
+        assert vm.item_size == 1
+
+    def test_vector_selection_for_glyphs(self, loaded_manager):
+        """Can get vectors for glyph display."""
+        manager = loaded_manager
+        vectors = manager.get_vector3_names()
+
+        assert "displacement" in vectors
+
+        disp = manager.get("displacement")
+        assert disp.item_size == 3
+
+    def test_principal_vectors_for_streamlines(self, loaded_manager):
+        """Can get principal vectors for streamlines."""
+        manager = loaded_manager
+        vectors = manager.get_vector3_names()
+
+        assert "stress:S1_vec" in vectors
+
+        s1_vec = manager.get("stress:S1_vec")
+        assert s1_vec.item_size == 3

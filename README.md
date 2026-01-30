@@ -38,3 +38,10 @@ pip install --force-reinstall dist/*.whl
 ```
 
 This creates `dist/xali_tools-0.1.0-py3-none-any.whl`.
+
+## Runninf some unit tests
+
+E.g.:
+```sh
+python -m pytest tests/test_weighted_sum.py -v
+```

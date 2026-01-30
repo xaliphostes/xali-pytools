@@ -19,7 +19,7 @@ import numpy as np
 from typing import List, Optional
 from pathlib import Path
 
-from .surface_data import SurfaceData
+from xali_tools.geom import SurfaceData
 
 try:
     import trimesh
@@ -30,10 +30,18 @@ except ImportError:
 # TSurf extensions (case-insensitive)
 TSURF_EXTENSIONS = {'.ts', '.tsurf'}
 
+# VTP extensions (case-insensitive)
+VTP_EXTENSIONS = {'.vtp'}
+
 
 def _is_tsurf_file(filepath: str) -> bool:
     """Check if file is a Gocad TSurf file by extension."""
     return Path(filepath).suffix.lower() in TSURF_EXTENSIONS
+
+
+def _is_vtp_file(filepath: str) -> bool:
+    """Check if file is a VTP file by extension."""
+    return Path(filepath).suffix.lower() in VTP_EXTENSIONS
 
 
 def _trimesh_to_surface_data(mesh: "trimesh.Trimesh", name: str = "surface") -> SurfaceData:
@@ -125,6 +133,11 @@ def load_surfaces(
     if _is_tsurf_file(filepath):
         from .tsurf_filter import load_all_tsurf
         return load_all_tsurf(filepath)
+
+    # Handle VTP files with pyvista
+    if _is_vtp_file(filepath):
+        from .vtp_filter import load_all_vtp
+        return load_all_vtp(filepath)
 
     # For other formats, use trimesh
     if not HAS_TRIMESH:

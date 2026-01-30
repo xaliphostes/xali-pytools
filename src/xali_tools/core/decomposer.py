@@ -1,8 +1,8 @@
 """
-Decomposer: Architecture for decomposing Series into derived properties.
+Decomposer: Architecture for decomposing Attributes into derived properties.
 
-A Serie with itemSize=3 (vector) can be decomposed into scalars (x, y, z, norm).
-A Serie with itemSize=6 (symmetric tensor) can be decomposed into components,
+An Attribute with itemSize=3 (vector) can be decomposed into scalars (x, y, z, norm).
+An Attribute with itemSize=6 (symmetric tensor) can be decomposed into components,
 principal values, principal vectors, etc.
 """
 
@@ -10,21 +10,21 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Type, Callable
 import numpy as np
 
-from .serie import Serie, SerieType
+from .attribute import Attribute, AttributeType
 
 
 class Decomposer(ABC):
     """
-    Abstract base class for Serie decomposers.
+    Abstract base class for Attribute decomposers.
 
-    A decomposer takes a Serie of a specific type and can produce
-    derived Series of potentially different item_sizes.
+    A decomposer takes an Attribute of a specific type and can produce
+    derived Attributes of potentially different item_sizes.
     """
 
     @property
     @abstractmethod
-    def input_serie_type(self) -> str:
-        """The serie_type this decomposer can process."""
+    def input_attribute_type(self) -> str:
+        """The attribute_type this decomposer can process."""
         pass
 
     @property
@@ -39,7 +39,7 @@ class Decomposer(ABC):
         Get available derived properties.
 
         Args:
-            base_name: Name of the source Serie.
+            base_name: Name of the source Attribute.
 
         Returns:
             Dict mapping derived names to their item_size.
@@ -48,16 +48,16 @@ class Decomposer(ABC):
         pass
 
     @abstractmethod
-    def compute(self, serie: Serie, derived_name: str) -> Serie:
+    def compute(self, attribute: Attribute, derived_name: str) -> Attribute:
         """
-        Compute a derived Serie.
+        Compute a derived Attribute.
 
         Args:
-            serie: Source Serie to decompose.
+            attribute: Source Attribute to decompose.
             derived_name: Name of the derived property (e.g., "T:x").
 
         Returns:
-            The computed derived Serie.
+            The computed derived Attribute.
         """
         pass
 
@@ -70,9 +70,9 @@ class Decomposer(ABC):
 
 class DecomposerRegistry:
     """
-    Registry of decomposers indexed by serie_type.
+    Registry of decomposers indexed by attribute_type.
 
-    Allows registration of new decomposers and lookup by serie_type.
+    Allows registration of new decomposers and lookup by attribute_type.
     """
 
     _instance = None
@@ -90,18 +90,18 @@ class DecomposerRegistry:
 
     def register(self, decomposer: Decomposer) -> None:
         """Register a decomposer."""
-        serie_type = decomposer.input_serie_type
-        if serie_type not in self._decomposers:
-            self._decomposers[serie_type] = []
+        attribute_type = decomposer.input_attribute_type
+        if attribute_type not in self._decomposers:
+            self._decomposers[attribute_type] = []
         # Avoid duplicates
-        for existing in self._decomposers[serie_type]:
+        for existing in self._decomposers[attribute_type]:
             if type(existing) == type(decomposer):
                 return
-        self._decomposers[serie_type].append(decomposer)
+        self._decomposers[attribute_type].append(decomposer)
 
-    def get_decomposers(self, serie_type: str) -> List[Decomposer]:
-        """Get all decomposers for a given serie_type."""
-        return self._decomposers.get(serie_type, [])
+    def get_decomposers(self, attribute_type: str) -> List[Decomposer]:
+        """Get all decomposers for a given attribute_type."""
+        return self._decomposers.get(attribute_type, [])
 
     def get_all_decomposers(self) -> Dict[str, List[Decomposer]]:
         """Get all registered decomposers."""
@@ -126,8 +126,8 @@ class Vector3Decomposer(Decomposer):
     """
 
     @property
-    def input_serie_type(self) -> str:
-        return SerieType.VECTOR3
+    def input_attribute_type(self) -> str:
+        return AttributeType.VECTOR3
 
     @property
     def input_item_size(self) -> int:
@@ -141,9 +141,9 @@ class Vector3Decomposer(Decomposer):
             f"{base_name}:norm": 1,
         }
 
-    def compute(self, serie: Serie, derived_name: str) -> Serie:
+    def compute(self, attribute: Attribute, derived_name: str) -> Attribute:
         suffix = self.get_suffix(derived_name)
-        data = serie.as_array()
+        data = attribute.as_array()
 
         if suffix == 'x':
             result = data[:, 0]
@@ -156,7 +156,7 @@ class Vector3Decomposer(Decomposer):
         else:
             raise ValueError(f"Unknown suffix: {suffix}")
 
-        return Serie(result, item_size=1, name=derived_name)
+        return Attribute(result, item_size=1, name=derived_name)
 
 
 class Vector2Decomposer(Decomposer):
@@ -169,8 +169,8 @@ class Vector2Decomposer(Decomposer):
     """
 
     @property
-    def input_serie_type(self) -> str:
-        return SerieType.VECTOR2
+    def input_attribute_type(self) -> str:
+        return AttributeType.VECTOR2
 
     @property
     def input_item_size(self) -> int:
@@ -183,9 +183,9 @@ class Vector2Decomposer(Decomposer):
             f"{base_name}:norm": 1,
         }
 
-    def compute(self, serie: Serie, derived_name: str) -> Serie:
+    def compute(self, attribute: Attribute, derived_name: str) -> Attribute:
         suffix = self.get_suffix(derived_name)
-        data = serie.as_array()
+        data = attribute.as_array()
 
         if suffix == 'x':
             result = data[:, 0]
@@ -196,7 +196,7 @@ class Vector2Decomposer(Decomposer):
         else:
             raise ValueError(f"Unknown suffix: {suffix}")
 
-        return Serie(result, item_size=1, name=derived_name)
+        return Attribute(result, item_size=1, name=derived_name)
 
 
 class SymTensor3Decomposer(Decomposer):
@@ -216,8 +216,8 @@ class SymTensor3Decomposer(Decomposer):
     INDICES = {name: i for i, name in enumerate(COMPONENTS)}
 
     @property
-    def input_serie_type(self) -> str:
-        return SerieType.SYM_TENSOR3
+    def input_attribute_type(self) -> str:
+        return AttributeType.SYM_TENSOR3
 
     @property
     def input_item_size(self) -> int:
@@ -231,9 +231,9 @@ class SymTensor3Decomposer(Decomposer):
         result[f"{base_name}:von_mises"] = 1
         return result
 
-    def compute(self, serie: Serie, derived_name: str) -> Serie:
+    def compute(self, attribute: Attribute, derived_name: str) -> Attribute:
         suffix = self.get_suffix(derived_name)
-        data = serie.as_array()  # shape (n, 6)
+        data = attribute.as_array()  # shape (n, 6)
 
         if suffix in self.INDICES:
             result = data[:, self.INDICES[suffix]]
@@ -251,7 +251,7 @@ class SymTensor3Decomposer(Decomposer):
         else:
             raise ValueError(f"Unknown suffix: {suffix}")
 
-        return Serie(result, item_size=1, name=derived_name)
+        return Attribute(result, item_size=1, name=derived_name)
 
 
 class SymTensor2Decomposer(Decomposer):
@@ -269,8 +269,8 @@ class SymTensor2Decomposer(Decomposer):
     INDICES = {name: i for i, name in enumerate(COMPONENTS)}
 
     @property
-    def input_serie_type(self) -> str:
-        return SerieType.SYM_TENSOR2
+    def input_attribute_type(self) -> str:
+        return AttributeType.SYM_TENSOR2
 
     @property
     def input_item_size(self) -> int:
@@ -283,9 +283,9 @@ class SymTensor2Decomposer(Decomposer):
         result[f"{base_name}:trace"] = 1
         return result
 
-    def compute(self, serie: Serie, derived_name: str) -> Serie:
+    def compute(self, attribute: Attribute, derived_name: str) -> Attribute:
         suffix = self.get_suffix(derived_name)
-        data = serie.as_array()  # shape (n, 3)
+        data = attribute.as_array()  # shape (n, 3)
 
         if suffix in self.INDICES:
             result = data[:, self.INDICES[suffix]]
@@ -294,7 +294,7 @@ class SymTensor2Decomposer(Decomposer):
         else:
             raise ValueError(f"Unknown suffix: {suffix}")
 
-        return Serie(result, item_size=1, name=derived_name)
+        return Attribute(result, item_size=1, name=derived_name)
 
 
 class PrincipalDecomposer(Decomposer):
@@ -310,8 +310,8 @@ class PrincipalDecomposer(Decomposer):
     """
 
     @property
-    def input_serie_type(self) -> str:
-        return SerieType.SYM_TENSOR3
+    def input_attribute_type(self) -> str:
+        return AttributeType.SYM_TENSOR3
 
     @property
     def input_item_size(self) -> int:
@@ -353,32 +353,32 @@ class PrincipalDecomposer(Decomposer):
 
         return values, vectors
 
-    def compute(self, serie: Serie, derived_name: str) -> Serie:
+    def compute(self, attribute: Attribute, derived_name: str) -> Attribute:
         suffix = self.get_suffix(derived_name)
-        data = serie.as_array()
+        data = attribute.as_array()
 
         values, vectors = self._compute_principals(data)
 
         if suffix == 'S1':
             result = values[:, 0]
-            return Serie(result, item_size=1, name=derived_name)
+            return Attribute(result, item_size=1, name=derived_name)
         elif suffix == 'S2':
             result = values[:, 1]
-            return Serie(result, item_size=1, name=derived_name)
+            return Attribute(result, item_size=1, name=derived_name)
         elif suffix == 'S3':
             result = values[:, 2]
-            return Serie(result, item_size=1, name=derived_name)
+            return Attribute(result, item_size=1, name=derived_name)
         elif suffix == 'S1_vec':
             result = vectors[:, 0, :]
-            return Serie(result, item_size=3, name=derived_name)
+            return Attribute(result, item_size=3, name=derived_name)
         elif suffix == 'S2_vec':
             result = vectors[:, 1, :]
-            return Serie(result, item_size=3, name=derived_name)
+            return Attribute(result, item_size=3, name=derived_name)
         elif suffix == 'S3_vec':
             result = vectors[:, 2, :]
-            return Serie(result, item_size=3, name=derived_name)
+            return Attribute(result, item_size=3, name=derived_name)
         elif suffix == 'principal_values':
-            return Serie(values, item_size=3, name=derived_name)
+            return Attribute(values, item_size=3, name=derived_name)
         else:
             raise ValueError(f"Unknown suffix: {suffix}")
 
@@ -400,8 +400,8 @@ class Tensor3Decomposer(Decomposer):
     INDICES = {name: i for i, name in enumerate(COMPONENTS)}
 
     @property
-    def input_serie_type(self) -> str:
-        return SerieType.TENSOR3
+    def input_attribute_type(self) -> str:
+        return AttributeType.TENSOR3
 
     @property
     def input_item_size(self) -> int:
@@ -416,17 +416,17 @@ class Tensor3Decomposer(Decomposer):
         result[f"{base_name}:antisymmetric"] = 3
         return result
 
-    def compute(self, serie: Serie, derived_name: str) -> Serie:
+    def compute(self, attribute: Attribute, derived_name: str) -> Attribute:
         suffix = self.get_suffix(derived_name)
-        data = serie.as_array()  # shape (n, 9)
+        data = attribute.as_array()  # shape (n, 9)
 
         if suffix in self.INDICES:
             result = data[:, self.INDICES[suffix]]
-            return Serie(result, item_size=1, name=derived_name)
+            return Attribute(result, item_size=1, name=derived_name)
         elif suffix == 'trace':
             # trace = xx + yy + zz (indices 0, 4, 8)
             result = data[:, 0] + data[:, 4] + data[:, 8]
-            return Serie(result, item_size=1, name=derived_name)
+            return Attribute(result, item_size=1, name=derived_name)
         elif suffix == 'symmetric':
             # Symmetric part: S_ij = 0.5 * (T_ij + T_ji)
             # [xx, xy, xz, yy, yz, zz]
@@ -437,14 +437,14 @@ class Tensor3Decomposer(Decomposer):
             yz = 0.5 * (data[:, 5] + data[:, 7])
             zz = data[:, 8]
             result = np.column_stack([xx, xy, xz, yy, yz, zz])
-            return Serie(result, item_size=6, name=derived_name)
+            return Attribute(result, item_size=6, name=derived_name)
         elif suffix == 'antisymmetric':
             # Antisymmetric part as axial vector: w = [yz-zy, zx-xz, xy-yx] / 2
             wx = 0.5 * (data[:, 5] - data[:, 7])  # yz - zy
             wy = 0.5 * (data[:, 6] - data[:, 2])  # zx - xz
             wz = 0.5 * (data[:, 1] - data[:, 3])  # xy - yx
             result = np.column_stack([wx, wy, wz])
-            return Serie(result, item_size=3, name=derived_name)
+            return Attribute(result, item_size=3, name=derived_name)
         else:
             raise ValueError(f"Unknown suffix: {suffix}")
 

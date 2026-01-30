@@ -42,37 +42,37 @@ print(surface.property_names())  # List of property names
 vertices = surface.get_positions_matrix()  # Shape (n_vertices, 3)
 faces = surface.get_indices_matrix()       # Shape (n_triangles, 3)
 
-# Get property as Serie (view, no copy)
-from xali_tools.core import Serie
-elevation = surface.get_property("elevation")  # Returns Serie
+# Get property as Attribute (view, no copy)
+from xali_tools.core import Attribute
+elevation = surface.get_property("elevation")  # Returns Attribute
 print(elevation.item_size)  # 1
 
 # Set property
 surface.set_property("normals", normal_data, item_size=3)
 ```
 
-### Integration with SerieContainer
+### Integration with AttributeManager
 
-Use `SerieContainer` to access derived properties (components, principal values, etc.):
+Use `AttributeManager` to access derived properties (components, principal values, etc.):
 
 ```python
 from xali_tools.io import load_surface
-from xali_tools.core import SerieContainer
+from xali_tools.core import AttributeManager
 
 # Load surface with stress tensor property
 surface = load_surface("fault.ts")
 
-# Create container from surface properties
-container = SerieContainer()
+# Create manager from surface properties
+manager = AttributeManager()
 for name in surface.property_names():
-    container.add(name, surface.get_property(name))
+    manager.add(name, surface.get_property(name))
 
 # Query available scalars for visualization
-scalars = container.get_scalar_names()
+scalars = manager.get_scalar_names()
 # ['stress:xx', 'stress:von_mises', 'stress:S1', ...]
 
 # Get derived property
-von_mises = container.get("stress:von_mises")
+von_mises = manager.get("stress:von_mises")
 ```
 
 ---

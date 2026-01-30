@@ -26,7 +26,7 @@ data = load_tsurf("multi_surface.ts", name="fault_1")
 import numpy as np
 from typing import List, Optional
 
-from .surface_data import SurfaceData
+from xali_tools.geom import SurfaceData
 
 
 def _parse_single_surface(lines: List[str], start_idx: int) -> tuple:
@@ -360,8 +360,7 @@ def load_all_tsurf_as_dict(filepath: str) -> List[dict]:
         for s in surfaces
     ]
 
-
-def _write_single_surface(f, data: SurfaceData) -> None:
+def get_tsurf(data: SurfaceData) -> str:
     """Write a single surface to an open file handle."""
     n_vertices = len(data.positions) // 3
     n_triangles = len(data.indices) // 3
@@ -372,10 +371,10 @@ def _write_single_surface(f, data: SurfaceData) -> None:
     has_properties = bool(data.properties)
 
     # Header
-    f.write("GOCAD TSurf 1\n")
-    f.write("HEADER {\n")
-    f.write(f"name: {data.name or 'surface'}\n")
-    f.write("}\n")
+    s = "GOCAD TSurf 1\n"
+    s += "HEADER {\n"
+    s += f"name: {data.name or 'surface'}\n"
+    s += "}\n"
 
     # Prepare property information for ESIZES support
     # Each entry: (name, esize, values)
@@ -384,23 +383,29 @@ def _write_single_surface(f, data: SurfaceData) -> None:
     if has_properties:
         for name, values in data.properties.items():
             values = np.asarray(values)
-            if values.ndim == 2 and values.shape[1] > 1:
-                # Vector property
-                dim = values.shape[1]
-                property_info.append((name, dim, values))
+            # Use property_sizes if available, otherwise infer from shape
+            esize = data.property_sizes.get(name, None)
+            if esize is None:
+                # Infer from array shape
+                esize = values.shape[1] if values.ndim == 2 and values.shape[1] > 1 else 1
+
+            if esize > 1:
+                # Vector/tensor property - reshape to (n_vertices, esize)
+                values = values.reshape(-1, esize)
+                property_info.append((name, esize, values))
             else:
                 # Scalar property
-                flat_values = values.flatten() if values.ndim > 1 else values
+                flat_values = values.flatten()
                 property_info.append((name, 1, flat_values))
 
         # Build PROPERTIES and ESIZES lines
         prop_names = [name for name, _, _ in property_info]
         esizes = [str(esize) for _, esize, _ in property_info]
 
-        f.write(f"PROPERTIES {' '.join(prop_names)}\n")
-        f.write(f"ESIZES {' '.join(esizes)}\n")
+        s += f"PROPERTIES {' '.join(prop_names)}\n"
+        s += f"ESIZES {' '.join(esizes)}\n"
 
-    f.write("TFACE\n")
+    s += "TFACE\n"
 
     # Vertices
     for i in range(n_vertices):
@@ -417,16 +422,20 @@ def _write_single_surface(f, data: SurfaceData) -> None:
                     # Scalar property
                     prop_values_list.append(f"{values[i]:.6g}")
             prop_values = ' '.join(prop_values_list)
-            f.write(f"PVRTX {i + 1} {x:.6g} {y:.6g} {z:.6g} {prop_values}\n")
+            s += f"PVRTX {i + 1} {x:.6g} {y:.6g} {z:.6g} {prop_values}\n"
         else:
-            f.write(f"VRTX {i + 1} {x:.6g} {y:.6g} {z:.6g}\n")
+            s += f"VRTX {i + 1} {x:.6g} {y:.6g} {z:.6g}\n"
 
     # Triangles (convert 0-based to 1-based)
     for i in range(n_triangles):
         v1, v2, v3 = indices[i]
-        f.write(f"TRGL {int(v1) + 1} {int(v2) + 1} {int(v3) + 1}\n")
+        s += f"TRGL {int(v1) + 1} {int(v2) + 1} {int(v3) + 1}\n"
 
-    f.write("END\n")
+    s += "END\n"
+    return s
+
+def _write_single_surface(f, data: SurfaceData) -> None:
+    f.write(get_tsurf(data))
 
 
 def save_tsurf(data: SurfaceData, filepath: str) -> None:

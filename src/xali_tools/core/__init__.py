@@ -1,7 +1,7 @@
 # xali_tools.core subpackage
 
-from .serie import Serie, SerieType
-from .container import SerieContainer
+from .attribute import Attribute, AttributeType
+from .attribute_manager import AttributeManager
 from .decomposer import (
     Decomposer,
     DecomposerRegistry,
@@ -13,11 +13,12 @@ from .decomposer import (
     Tensor3Decomposer,
     register_default_decomposers,
 )
+from .math import weighted_sum, normalized_weighted_sum, weighted_sum_from_manager
 
 __all__ = [
-    "Serie",
-    "SerieType",
-    "SerieContainer",
+    "Attribute",
+    "AttributeType",
+    "AttributeManager",
     "Decomposer",
     "DecomposerRegistry",
     "Vector2Decomposer",
@@ -27,4 +28,7 @@ __all__ = [
     "PrincipalDecomposer",
     "Tensor3Decomposer",
     "register_default_decomposers",
+    "weighted_sum",
+    "normalized_weighted_sum",
+    "weighted_sum_from_manager",
 ]

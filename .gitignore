@@ -5,3 +5,5 @@ __pycache__
 .DS_Store
 xali_tools.egg-info
 output.pdf
+tmp_*
+.pytest_cache
