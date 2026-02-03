@@ -2,8 +2,8 @@
 Cost functions for stress inversion using principal direction and stress ratio data.
 
 Common data types:
-- SHmax: Maximum horizontal principal stress direction
-- R = (S2-S3)/(S1-S3): Stress ratio (shape factor)
+  - SHmax: Maximum horizontal principal stress direction
+  - R = (S2-S3)/(S1-S3): Stress ratio (shape factor)
   - R = 0: S2 = S3 (prolate/uniaxial compression)
   - R = 0.5: S2 = (S1+S3)/2 (triaxial)
   - R = 1: S1 = S2 (oblate/uniaxial extension)

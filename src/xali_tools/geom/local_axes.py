@@ -214,9 +214,9 @@ def compute_local_axes(
 
 def set_local_axes(
     surface: SurfaceData,
-    dip_name: str = "dip_axis",
-    strike_name: str = "strike_axis",
-    normal_name: str = "normal_axis"
+    dip_name: str = "dip",
+    strike_name: str = "strike",
+    normal_name: str = "normal"
 ) -> SurfaceData:
     """
     Compute local coordinate axes and store them as properties on the SurfaceData.

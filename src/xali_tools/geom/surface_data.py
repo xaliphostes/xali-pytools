@@ -1,5 +1,5 @@
 """
-Unified surface data structure for all mesh formats.
+Unified surface data structure for all mesh (triangulated 2D/3D surface) formats.
 """
 
 import numpy as np
